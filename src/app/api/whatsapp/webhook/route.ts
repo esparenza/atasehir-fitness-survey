@@ -72,14 +72,31 @@ export async function POST(req: NextRequest) {
 
 async function handleMessage(m: WaMessage) {
   const db = getAdminClient();
-  const phone = m.from.replace(/\D/g, "");
+  const digits = m.from.replace(/\D/g, "");
+  const last10 = digits.slice(-10);
 
-  const { data: member } = await db
+  // Son 10 haneye göre ara (905xx, 05xx, 5xx fark etmeksizin eşleşir)
+  let { data: member } = await db
     .from("members")
     .select("id, full_name, survey_status")
-    .eq("phone_number", phone)
+    .ilike("phone_number", `%${last10}`)
     .maybeSingle();
-  if (!member) return; // listede olmayan numara
+
+  // Eğer veritabanında yoksa otomatik üye olarak kaydet ve anketi başlat
+  if (!member) {
+    const stdPhone = last10.startsWith("5") ? "90" + last10 : digits;
+    const { data: newMember, error: createErr } = await db
+      .from("members")
+      .insert({ full_name: "WhatsApp Üyesi", phone_number: stdPhone, survey_status: "devam_ediyor" })
+      .select("id, full_name, survey_status")
+      .single();
+    if (createErr || !newMember) {
+      console.error("[webhook] yeni üye oluşturulamadı:", createErr);
+      return;
+    }
+    member = newMember;
+  }
+  const phone = member.phone_number || digits;
 
   // Anket kapanmışsa tekrar işlem yapma
   if (member.survey_status === "tamamlandi" || member.survey_status === "reddetti") return;
