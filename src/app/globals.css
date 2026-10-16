@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-ink-950 text-zinc-200 antialiased;
+  background-image:
+    radial-gradient(900px 500px at 85% -10%, rgba(198, 255, 61, 0.07), transparent 60%),
+    radial-gradient(700px 400px at -10% 10%, rgba(99, 102, 241, 0.08), transparent 60%);
+  background-attachment: fixed;
+}
+
+.card {
+  @apply rounded-2xl border border-white/[0.07] bg-ink-800/70 backdrop-blur-md;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-ink-600;
+}
+
+.wa-bg {
+  background-color: #0b141a;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
