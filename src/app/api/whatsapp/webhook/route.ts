@@ -78,7 +78,7 @@ async function handleMessage(m: WaMessage) {
   // Son 10 haneye göre ara (905xx, 05xx, 5xx fark etmeksizin eşleşir)
   let { data: member } = await db
     .from("members")
-    .select("id, full_name, survey_status")
+    .select("id, full_name, phone_number, survey_status")
     .ilike("phone_number", `%${last10}`)
     .maybeSingle();
 
@@ -88,7 +88,7 @@ async function handleMessage(m: WaMessage) {
     const { data: newMember, error: createErr } = await db
       .from("members")
       .insert({ full_name: "WhatsApp Üyesi", phone_number: stdPhone, survey_status: "devam_ediyor" })
-      .select("id, full_name, survey_status")
+      .select("id, full_name, phone_number, survey_status")
       .single();
     if (createErr || !newMember) {
       console.error("[webhook] yeni üye oluşturulamadı:", createErr);
