@@ -20,5 +20,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api/whatsapp/webhook|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api/whatsapp/webhook|privacy|_next/static|_next/image|favicon.ico).*)"],
 };
