@@ -27,9 +27,10 @@ async function post(body: unknown) {
 export async function sendText(to: string, text: string) {
   return post({
     messaging_product: "whatsapp",
+    recipient_type: "individual",
     to,
     type: "text",
-    text: { body: text, preview_url: false },
+    text: { body: text },
   });
 }
 
