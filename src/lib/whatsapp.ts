@@ -19,7 +19,22 @@ async function post(body: unknown) {
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(`WhatsApp API ${res.status}: ${JSON.stringify(json?.error ?? json)}`);
+    const errObj = json?.error ?? {};
+    const code = errObj.code;
+    let hint = errObj.message || JSON.stringify(errObj);
+    if (code === 190) {
+      hint =
+        "WhatsApp Access Token süresi dolmuş (Kod 190). Meta Business ayarlarından kalıcı (System User) token alıp WHATSAPP_TOKEN değişkenini güncelleyin.";
+    } else if (code === 131030) {
+      hint =
+        "Alıcı numara Meta Test listesinde ekli değil (Kod 131030). Meta Developer > WhatsApp > API Setup'tan numarayı test listesine ekleyin.";
+    } else if (code === 131047) {
+      hint =
+        "24 saatlik pencere kapalı (Kod 131047). Üyeye önce onaylı şablon mesajı gönderilmelidir.";
+    }
+    const err = new Error(`WhatsApp API ${res.status}: ${hint}`) as Error & { code?: number };
+    err.code = code;
+    throw err;
   }
   return json;
 }
@@ -36,21 +51,41 @@ export async function sendText(to: string, text: string) {
 
 /**
  * Onaylı şablonu gönderir. Şablon gövdesinde {{1}} değişkeni (üye adı)
- * varsa isim parametresi eklenir.
+ * varsa isim parametresi eklenir; eğer şablonda değişken yoksa (Kod 132000/132012)
+ * otomatik olarak parametresiz gönderim dener.
  */
 export async function sendTemplate(to: string, firstName: string) {
   const name = process.env.WHATSAPP_TEMPLATE_NAME;
   if (!name) throw new Error("WHATSAPP_TEMPLATE_NAME eksik.");
-  return post({
-    messaging_product: "whatsapp",
-    to,
-    type: "template",
-    template: {
-      name,
-      language: { code: process.env.WHATSAPP_TEMPLATE_LANG || "tr" },
-      components: [
-        { type: "body", parameters: [{ type: "text", text: firstName }] },
-      ],
-    },
-  });
+  const lang = process.env.WHATSAPP_TEMPLATE_LANG || "tr";
+
+  try {
+    return await post({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to,
+      type: "template",
+      template: {
+        name,
+        language: { code: lang },
+        components: [
+          { type: "body", parameters: [{ type: "text", text: firstName }] },
+        ],
+      },
+    });
+  } catch (e: any) {
+    if (e?.code === 132000 || e?.code === 132012) {
+      return await post({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type: "template",
+        template: {
+          name,
+          language: { code: lang },
+        },
+      });
+    }
+    throw e;
+  }
 }

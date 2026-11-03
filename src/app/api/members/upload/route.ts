@@ -19,6 +19,31 @@ export async function POST(req: NextRequest) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ error: "Supabase yapılandırılmamış." }, { status: 400 });
   }
+
+  // Tekil üye ekleme (JSON body: { full_name, phone_number })
+  if (req.headers.get("content-type")?.includes("application/json")) {
+    const body = await req.json().catch(() => ({}));
+    const name = String(body?.full_name ?? "").trim();
+    const phone = normalizePhone(body?.phone_number);
+    if (!name || !phone) {
+      return NextResponse.json(
+        { error: "Geçerli bir isim ve telefon numarası (05xx / 905xx) girin." },
+        { status: 400 }
+      );
+    }
+    const db = getAdminClient();
+    const { data: inserted, error } = await db
+      .from("members")
+      .upsert([{ full_name: name, phone_number: phone }], {
+        onConflict: "phone_number",
+        ignoreDuplicates: true,
+      })
+      .select("id");
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const added = inserted?.length ?? 0;
+    return NextResponse.json({ total: 1, added, skipped: 1 - added, invalid: 0 });
+  }
+
   const form = await req.formData().catch(() => null);
   const file = form?.get("file");
   if (!(file instanceof File)) {

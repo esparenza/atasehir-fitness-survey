@@ -1,10 +1,20 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import type { Sentiment } from "./types";
 
-const MODEL = "gemini-2.5-flash";
+const MODELS = ["gemini-3-flash-preview", "gemini-2.5-flash"];
 export const END_TOKEN = "[ANKET_BITTI]";
 
-export const CHAT_SYSTEM_PROMPT = `Sen Ataşehir Fitness'ın samimi, enerjik ve çözüm odaklı üye ilişkileri asistanısın. Üyeyle WhatsApp üzerinden konuşuyorsun. Mesajların kısa, samimi ve emoji destekli olsun (robot gibi uzun paragraflar yazma). Amacın üyeyi sıkmadan şu 3 konuda fikrini öğrenmek: 1) Ekipmanların yeterliliği ve salon düzeni, 2) Soyunma odaları, duşlar ve genel temizlik, 3) Eğitmenlerin ve resepsiyonun ilgisi. Soruları tek tek sor, üye cevap verdikçe empati kurarak diğer soruya geç. 3 konuyu da öğrendiğinde veya üye sohbeti bitirmek istediğinde teşekkür et ve cevabının sonuna gizli bir belirteç olarak \`${END_TOKEN}\` ekle.`;
+export const CHAT_SYSTEM_PROMPT = `Sen Ataşehir Fitness'ın samimi, enerjik ve çözüm odaklı üye ilişkileri asistanısın. Üyeyle WhatsApp üzerinden konuşuyorsun.
+Kurallar:
+- Mesajların kısa, doğal, samimi ve ölçülü emoji destekli olsun (robot gibi uzun paragraflar yazma, en fazla 2-3 kısa cümle kur).
+- Eğer konuşma geçmişinde üyeye zaten selam verdiysen tekrar "Merhaba ben Ataşehir Fitness asistanıyım" diyerek baştan tanışma, doğrudan sohbete devam et.
+- Amacın üyeyi sıkmadan şu 3 konuda fikrini öğrenmek:
+  1) Ekipmanların yeterliliği ve salon düzeni
+  2) Soyunma odaları, duşlar ve genel temizlik
+  3) Eğitmenlerin ve resepsiyonun ilgisi
+- Soruları TEK TEK sor. Aynı mesajda birden fazla soru sorma.
+- Üye bir cevabında birden fazla konudan bahsettiyse o konuyu tekrar sorma, yalnızca konuşulmayan konuya geç.
+- 3 konunun tamamı hakkında fikir aldığında veya üye sohbeti sonlandırmak istediğinde yeni soru sorma; samimi şekilde teşekkür et ve cevabının en sonuna gizli belirteç olarak mutlaka ${END_TOKEN} ekle.`;
 
 function ai() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -17,21 +27,94 @@ export interface HistoryItem {
   content: string;
 }
 
-/** Gemini ilk içeriğin 'user' olmasını ister; baştaki bot (davet) mesajlarını atar. */
-function toContents(history: HistoryItem[]) {
-  const items = [...history];
-  while (items.length && items[0].sender === "bot") items.shift();
-  return items.map((m) => ({
-    role: m.sender === "user" ? "user" : "model",
-    parts: [{ text: m.content }],
+/**
+ * Gemini API ilk mesajın 'user' olmasını ve rollerin sırayla (user/model) gitmesini ister.
+ * - İlk mesaj 'bot' ise (örn. kampanya daveti), başına sentetik bir başlangıç ekleriz ki bot kendi davetini görsün.
+ * - Arka arkaya gelen aynı rollü mesajları (örn. üyenin üst üste yazdığı 2 mesaj) tek blokta birleştiririz.
+ */
+export function toContents(history: HistoryItem[]) {
+  const valid = history.filter((m) => m.content && m.content.trim().length > 0);
+  if (valid.length === 0) {
+    return [{ role: "user", parts: [{ text: "Merhaba" }] }];
+  }
+
+  const merged: { role: "user" | "model"; text: string }[] = [];
+
+  if (valid[0].sender === "bot") {
+    merged.push({ role: "user", text: "Merhaba, anket davetinizi aldım." });
+  }
+
+  for (const m of valid) {
+    const role = m.sender === "user" ? "user" : "model";
+    const cleanText = m.content.replace(END_TOKEN, "").trim();
+    if (!cleanText) continue;
+
+    const last = merged[merged.length - 1];
+    if (last && last.role === role) {
+      last.text += `\n${cleanText}`;
+    } else {
+      merged.push({ role, text: cleanText });
+    }
+  }
+
+  // Son mesajın 'user' olduğundan emin ol
+  if (merged.length === 0 || merged[merged.length - 1].role !== "user") {
+    merged.push({ role: "user", text: "Devam edelim." });
+  }
+
+  return merged.map((m) => ({
+    role: m.role,
+    parts: [{ text: m.text }],
   }));
 }
 
-export async function generateChatReply(history: HistoryItem[]): Promise<string> {
-  const res = await ai().models.generateContent({
-    model: MODEL,
+async function generateWithFallback(params: {
+  contents: any;
+  config: Record<string, any>;
+}) {
+  const client = ai();
+  let lastErr: unknown;
+  for (const model of MODELS) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await client.models.generateContent({
+          model,
+          contents: params.contents,
+          config: params.config,
+        });
+        if (res.text && res.text.trim()) return res;
+      } catch (err: any) {
+        lastErr = err;
+        const status = err?.status ?? err?.code;
+        // 503 (Yoğunluk) veya 429 (Limit) durumunda kısa bekleyip tekrar / yedek modeli dene
+        if (status === 503 || status === 429) {
+          await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+          continue;
+        }
+        break;
+      }
+    }
+  }
+  throw lastErr ?? new Error("Gemini yanıt üretemedi.");
+}
+
+export async function generateChatReply(
+  history: HistoryItem[],
+  memberName?: string
+): Promise<string> {
+  const cleanName =
+    memberName && memberName !== "WhatsApp Üyesi" ? memberName.trim().split(/\s+/)[0] : null;
+  const nameInstruction = cleanName
+    ? `\nÜyenin adı: ${cleanName}. Uygun yerlerde ismiyle samimi şekilde hitap et.`
+    : "";
+
+  const res = await generateWithFallback({
     contents: toContents(history),
-    config: { systemInstruction: CHAT_SYSTEM_PROMPT, temperature: 0.8 },
+    config: {
+      systemInstruction: CHAT_SYSTEM_PROMPT + nameInstruction,
+      temperature: 0.7,
+      thinkingConfig: { thinkingBudget: 0 },
+    },
   });
   return (res.text ?? "").trim();
 }
@@ -53,8 +136,7 @@ export async function analyzeConversation(history: HistoryItem[]): Promise<Analy
     .map((m) => `${m.sender === "user" ? "ÜYE" : "ASİSTAN"}: ${m.content.replace(END_TOKEN, "").trim()}`)
     .join("\n");
 
-  const res = await ai().models.generateContent({
-    model: MODEL,
+  const res = await generateWithFallback({
     contents: [
       {
         role: "user",
@@ -74,6 +156,7 @@ ${transcript}`,
     ],
     config: {
       responseMimeType: "application/json",
+      thinkingConfig: { thinkingBudget: 0 },
       responseSchema: {
         type: Type.OBJECT,
         properties: {
@@ -107,7 +190,12 @@ ${transcript}`,
     },
   });
 
-  const p = JSON.parse(res.text ?? "{}");
+  let p: Record<string, any> = {};
+  try {
+    p = JSON.parse(res.text ?? "{}");
+  } catch {
+    p = {};
+  }
   const sentiment: Sentiment = ["pozitif", "notr", "negatif"].includes(p.sentiment)
     ? p.sentiment
     : "notr";

@@ -46,6 +46,11 @@ export async function POST(req: NextRequest) {
       const firstName = m.full_name.trim().split(/\s+/)[0] || "Üyemiz";
       await sendTemplate(m.phone_number, firstName);
       await db.from("members").update({ survey_status: "davet_gonderildi" }).eq("id", m.id);
+      await db.from("messages").insert({
+        member_id: m.id,
+        sender: "bot",
+        content: `Merhaba ${firstName}! 👋 Ataşehir Fitness olarak deneyimini daha iyi hale getirmek için 1 dakikalık kısa memnuniyet anketimize katılmak ister misin?`,
+      });
       sent++;
     } catch (e) {
       failed.push({ phone: m.phone_number, error: e instanceof Error ? e.message : String(e) });

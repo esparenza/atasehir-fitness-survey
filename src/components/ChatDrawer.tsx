@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { X, Phone, Loader2, AlertTriangle, CheckCheck } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { X, Phone, Loader2, AlertTriangle, CheckCheck, RotateCcw, Send } from "lucide-react";
 import type { ChatMessage, MemberRow } from "@/lib/types";
 import { getMockMessages } from "@/lib/mock";
 
@@ -12,32 +12,49 @@ export default function ChatDrawer({
   member,
   demo,
   onClose,
+  onUpdated,
 }: {
   member: MemberRow;
   demo: boolean;
   onClose: () => void;
+  onUpdated?: () => void;
 }) {
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
+  const [simInput, setSimInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const prevCountRef = useRef(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    setMessages(null);
+  const fetchMessages = useCallback(async () => {
     if (demo) {
       setMessages(getMockMessages(member.id));
       return;
     }
-    fetch(`/api/members/${member.id}/messages`)
-      .then((r) => r.json())
-      .then((d) => !cancelled && setMessages(d.messages ?? []))
-      .catch(() => !cancelled && setMessages([]));
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const r = await fetch(`/api/members/${member.id}/messages`, { cache: "no-store" });
+      const d = await r.json();
+      setMessages(d.messages ?? []);
+    } catch {
+      // sessizce geç
+    }
   }, [member.id, demo]);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    setMessages(null);
+    prevCountRef.current = 0;
+    fetchMessages();
+    if (demo) return;
+    const timer = setInterval(fetchMessages, 4000);
+    return () => clearInterval(timer);
+  }, [fetchMessages, demo]);
+
+  useEffect(() => {
+    const count = messages?.length ?? 0;
+    if (count > prevCountRef.current) {
+      endRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+    prevCountRef.current = count;
   }, [messages]);
 
   useEffect(() => {
@@ -45,6 +62,42 @@ export default function ChatDrawer({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  async function handleReset() {
+    if (demo) return;
+    if (!confirm(`${member.full_name} için sohbet geçmişi ve analiz sıfırlansın mı?`)) return;
+    setResetting(true);
+    try {
+      await fetch(`/api/members/${member.id}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset" }),
+      });
+      await fetchMessages();
+      onUpdated?.();
+    } finally {
+      setResetting(false);
+    }
+  }
+
+  async function handleSimulate(e: React.FormEvent) {
+    e.preventDefault();
+    const txt = simInput.trim();
+    if (!txt || sending || demo) return;
+    setSending(true);
+    setSimInput("");
+    try {
+      await fetch(`/api/members/${member.id}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "simulate", content: txt }),
+      });
+      await fetchMessages();
+      onUpdated?.();
+    } finally {
+      setSending(false);
+    }
+  }
 
   const a = member.analysis;
 
@@ -62,6 +115,17 @@ export default function ChatDrawer({
               <Phone size={11} /> +{member.phone_number}
             </p>
           </div>
+          {!demo && (
+            <button
+              onClick={handleReset}
+              disabled={resetting}
+              title="Anketi ve mesajları sıfırla (yeniden test et)"
+              className="flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:opacity-40"
+            >
+              {resetting ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}
+              Sıfırla
+            </button>
+          )}
           <button
             id="close-chat-drawer"
             onClick={onClose}
@@ -112,9 +176,30 @@ export default function ChatDrawer({
           )}
           <div ref={endRef} />
         </div>
-        <p className="bg-[#202c33] px-4 py-2 text-center text-[11px] text-zinc-500">
-          Yalnızca okunabilir · AI asistan ile yapılan yazışma
-        </p>
+        {!demo ? (
+          <form onSubmit={handleSimulate} className="flex items-center gap-2 bg-[#202c33] px-3 py-2.5">
+            <input
+              type="text"
+              value={simInput}
+              onChange={(e) => setSimInput(e.target.value)}
+              disabled={sending}
+              placeholder="Üye adına test mesajı yazın..."
+              className="flex-1 rounded-xl border border-white/10 bg-[#2a3942] px-3 py-2 text-xs text-white outline-none placeholder:text-zinc-400 focus:border-brand/60"
+            />
+            <button
+              type="submit"
+              disabled={sending || !simInput.trim()}
+              className="flex h-8 w-8 items-center justify-center rounded-xl bg-brand text-ink-950 transition hover:bg-brand-dark disabled:opacity-40"
+              title="Test mesajı gönder"
+            >
+              {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            </button>
+          </form>
+        ) : (
+          <p className="bg-[#202c33] px-4 py-2 text-center text-[11px] text-zinc-500">
+            Örnek veri modu · Gerçek test için örnek veri modunu kapatın
+          </p>
+        )}
       </aside>
     </div>
   );

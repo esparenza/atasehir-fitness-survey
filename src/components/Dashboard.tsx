@@ -53,29 +53,46 @@ export default function Dashboard() {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<MemberRow | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const res = await fetch("/api/dashboard", { cache: "no-store" });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Veri alınamadı");
       setConfigured(d.configured);
-      if (!d.configured) setDemo(true);
+      if (!d.configured && !silent) setDemo(true);
       setMembers(d.members ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Hata");
-      setDemo(true);
+      if (!silent) {
+        setError(e instanceof Error ? e.message : "Hata");
+        setDemo(true);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    load();
+    load(false);
   }, [load]);
 
+  // Canlı modda her 8 saniyede bir sessizce yeni mesaj/durum kontrolü yap
+  useEffect(() => {
+    if (demo) return;
+    const timer = setInterval(() => {
+      load(true);
+    }, 8000);
+    return () => clearInterval(timer);
+  }, [demo, load]);
+
   const data = demo ? MOCK_MEMBERS : members;
+  const activeMember = useMemo(
+    () => (selected ? data.find((m) => m.id === selected.id) ?? selected : null),
+    [data, selected]
+  );
   const stats = useMemo(() => computeStats(data), [data]);
 
   const rows = useMemo(() => {
@@ -131,7 +148,7 @@ export default function Dashboard() {
           </button>
           <button
             id="refresh"
-            onClick={load}
+            onClick={() => load(false)}
             className="rounded-xl border border-white/10 p-2.5 text-zinc-400 transition hover:text-white"
             aria-label="Yenile"
           >
@@ -230,7 +247,7 @@ export default function Dashboard() {
         </div>
       </section>
 
-      <UploadPanel demo={demo} pending={stats.pending} onChanged={load} />
+      <UploadPanel demo={demo} pending={stats.pending} onChanged={() => load(true)} />
 
       {/* Table */}
       <section className="card overflow-hidden" aria-labelledby="table-title">
@@ -328,7 +345,14 @@ export default function Dashboard() {
         )}
       </section>
 
-      {selected && <ChatDrawer member={selected} demo={demo} onClose={() => setSelected(null)} />}
+      {activeMember && (
+        <ChatDrawer
+          member={activeMember}
+          demo={demo}
+          onClose={() => setSelected(null)}
+          onUpdated={() => load(true)}
+        />
+      )}
     </main>
   );
 }

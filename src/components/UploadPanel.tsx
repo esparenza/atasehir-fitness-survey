@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { UploadCloud, Send, Loader2, FileSpreadsheet } from "lucide-react";
+import { UploadCloud, Send, Loader2, FileSpreadsheet, UserPlus } from "lucide-react";
 
 type Notice = { kind: "ok" | "err"; text: string } | null;
 
@@ -17,8 +17,42 @@ export default function UploadPanel({
   const [drag, setDrag] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [addingSingle, setAddingSingle] = useState(false);
+  const [singleName, setSingleName] = useState("");
+  const [singlePhone, setSinglePhone] = useState("");
   const [notice, setNotice] = useState<Notice>(null);
   const input = useRef<HTMLInputElement>(null);
+
+  async function addSingle(e: React.FormEvent) {
+    e.preventDefault();
+    setNotice(null);
+    if (!singleName.trim() || !singlePhone.trim()) return;
+    if (demo) {
+      setNotice({ kind: "ok", text: "Demo modu: Örnek veri modunu kapatıp gerçek üye ekleyebilirsiniz." });
+      return;
+    }
+    setAddingSingle(true);
+    try {
+      const res = await fetch("/api/members/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ full_name: singleName.trim(), phone_number: singlePhone.trim() }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Üye eklenemedi");
+      setNotice({
+        kind: "ok",
+        text: d.added ? `"${singleName.trim()}" başarıyla eklendi.` : "Bu numara zaten kayıtlı.",
+      });
+      setSingleName("");
+      setSinglePhone("");
+      onChanged();
+    } catch (err) {
+      setNotice({ kind: "err", text: err instanceof Error ? err.message : "Hata" });
+    } finally {
+      setAddingSingle(false);
+    }
+  }
 
   async function upload(file: File) {
     setNotice(null);
@@ -133,6 +167,34 @@ export default function UploadPanel({
           </span>
         </button>
       </div>
+
+      <form onSubmit={addSingle} className="mt-4 flex flex-wrap items-center gap-2 border-t border-white/[0.06] pt-4">
+        <span className="mr-1 flex items-center gap-1.5 text-xs font-medium text-zinc-400">
+          <UserPlus size={14} className="text-brand" /> Hızlı Üye Ekle:
+        </span>
+        <input
+          type="text"
+          value={singleName}
+          onChange={(e) => setSingleName(e.target.value)}
+          placeholder="Ad Soyad"
+          className="w-44 rounded-xl border border-white/10 bg-ink-900 px-3 py-2 text-xs text-white outline-none placeholder:text-zinc-600 focus:border-brand/60"
+        />
+        <input
+          type="tel"
+          value={singlePhone}
+          onChange={(e) => setSinglePhone(e.target.value)}
+          placeholder="Telefon (05xx...)"
+          className="w-44 rounded-xl border border-white/10 bg-ink-900 px-3 py-2 text-xs text-white outline-none placeholder:text-zinc-600 focus:border-brand/60"
+        />
+        <button
+          type="submit"
+          disabled={addingSingle || !singleName.trim() || !singlePhone.trim()}
+          className="flex items-center gap-1.5 rounded-xl border border-brand/40 bg-brand/10 px-3.5 py-2 text-xs font-medium text-brand transition hover:bg-brand/20 disabled:opacity-40"
+        >
+          {addingSingle ? <Loader2 size={13} className="animate-spin" /> : <UserPlus size={13} />}
+          Ekle
+        </button>
+      </form>
       {notice && (
         <p className={`mt-3 text-sm ${notice.kind === "ok" ? "text-brand" : "text-red-400"}`}>{notice.text}</p>
       )}
