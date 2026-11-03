@@ -9,11 +9,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const REJECT_RE = /müsait\s*değilim|musait\s*degilim|ilgilenmiyorum/i;
-const RESTART_RE = /^(anket|yeniden|sıfırla|sifirla|tekrar|başla|basla|evet|başlayalım|baslayalim)$/i;
 const REJECT_REPLY =
-  "Anlayışınız için teşekkürler 🙏 Fikriniz bizim için değerli, dilediğiniz zaman 'anket' yazarak katılabilirsiniz. İyi antrenmanlar! 💪";
-const COMPLETED_INFO_REPLY =
-  "Mesajınız yönetici panelimize iletildi 🙏 Memnuniyet anketini baştan başlatmak isterseniz *yeniden* yazabilirsiniz. İyi antrenmanlar! 💪";
+  "Anlayışınız için teşekkürler 🙏 Fikriniz bizim için değerli, dilediğiniz zaman bize yazabilirsiniz. İyi antrenmanlar! 💪";
 const FALLBACK_REPLY = "Şu an mesajınızı işleyemiyorum 🙈 Birazdan tekrar yazar mısınız?";
 
 // --- GET: Meta webhook doğrulaması ---
@@ -137,38 +134,24 @@ async function handleMessage(m: WaMessage) {
   const phone = member.phone_number || stdPhone;
 
   const { text, isButton } = extractText(m);
-  if (!text) {
-    await safeSendText(phone, "Şimdilik sadece yazılı mesajları okuyabiliyorum 😊 Fikrini yazar mısın?");
-    return;
-  }
+  const trimmed = (text ?? "").trim();
 
-  const trimmed = text.trim();
-
-  // Şablondaki "Evet, başlayalım" butonuna basıldıysa veya 'yeniden/sıfırla' yazıldıysa temiz başlangıç yap
-  if ((isButton && !REJECT_RE.test(trimmed)) || /^(yeniden|sıfırla|sifirla)$/i.test(trimmed)) {
+  // Yeni bir davet şablonundaki "Evet, başlayalım" butonuna basıldıysa eski geçmişi sıfırla ve başlat
+  if (isButton && trimmed && !REJECT_RE.test(trimmed)) {
     await db.from("messages").delete().eq("member_id", member.id);
     await db.from("survey_analyses").delete().eq("member_id", member.id);
     await db.from("members").update({ survey_status: "devam_ediyor" }).eq("id", member.id);
     member.survey_status = "devam_ediyor";
   }
 
-  // Anket daha önce tamamlanmış veya reddedilmişse:
+  // Anket tamamlanmış veya reddedilmişse tamamen sessiz kal (otomatik mesaj dönme)
   if (member.survey_status === "tamamlandi" || member.survey_status === "reddetti") {
-    if (RESTART_RE.test(trimmed)) {
-      await db.from("messages").delete().eq("member_id", member.id);
-      await db.from("survey_analyses").delete().eq("member_id", member.id);
-      await db.from("members").update({ survey_status: "devam_ediyor" }).eq("id", member.id);
-      member.survey_status = "devam_ediyor";
-    } else {
-      // Yine de mesajı kaydet ki yönetici panelde görebilsin ve bilgi yanıtı dön
-      const { error: closedInsErr } = await db
-        .from("messages")
-        .insert({ member_id: member.id, sender: "user", content: trimmed, wa_message_id: m.id });
-      if (closedInsErr?.code === "23505") return;
-      await db.from("messages").insert({ member_id: member.id, sender: "bot", content: COMPLETED_INFO_REPLY });
-      await safeSendText(phone, COMPLETED_INFO_REPLY);
-      return;
-    }
+    return { status: "ignored_completed" };
+  }
+
+  if (!trimmed) {
+    await safeSendText(phone, "Şimdilik sadece yazılı mesajları okuyabiliyorum 😊 Fikrini yazar mısın?");
+    return { status: "non_text" };
   }
 
   // Tekrar teslim edilen mesajları (aynı wa id) atla
