@@ -76,21 +76,27 @@ export async function POST(req: NextRequest) {
   }
 
   // Meta'nın tekrar denemelerini engellemek için hata olsa da 200 döneriz.
+  const results: any[] = [];
   for (const m of messages) {
     try {
-      await handleMessage(m);
-    } catch (err) {
+      const r = await handleMessage(m);
+      results.push(r);
+    } catch (err: any) {
       console.error("[webhook] mesaj işlenemedi:", err);
+      results.push({ error: err?.message ?? String(err) });
     }
   }
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, results });
 }
 
-async function safeSendText(phone: string, text: string) {
+async function safeSendText(phone: string, text: string): Promise<{ sent: boolean; error?: string }> {
   try {
     await sendText(phone, text);
-  } catch (err) {
-    console.error("[webhook] WhatsApp mesaj gönderilemedi:", err);
+    return { sent: true };
+  } catch (err: any) {
+    const msg = err?.message ?? String(err);
+    console.error("[webhook] WhatsApp mesaj gönderilemedi:", msg);
+    return { sent: false, error: msg };
   }
 }
 
@@ -138,10 +144,17 @@ async function handleMessage(m: WaMessage) {
 
   const trimmed = text.trim();
 
+  // Şablondaki "Evet, başlayalım" butonuna basıldıysa veya 'yeniden/sıfırla' yazıldıysa temiz başlangıç yap
+  if ((isButton && !REJECT_RE.test(trimmed)) || /^(yeniden|sıfırla|sifirla)$/i.test(trimmed)) {
+    await db.from("messages").delete().eq("member_id", member.id);
+    await db.from("survey_analyses").delete().eq("member_id", member.id);
+    await db.from("members").update({ survey_status: "devam_ediyor" }).eq("id", member.id);
+    member.survey_status = "devam_ediyor";
+  }
+
   // Anket daha önce tamamlanmış veya reddedilmişse:
   if (member.survey_status === "tamamlandi" || member.survey_status === "reddetti") {
-    // Eğer üye şablon butonuna bastıysa veya 'yeniden / anket / başla' yazdıysa anketi sıfırlayıp yeniden başlat
-    if (isButton || RESTART_RE.test(trimmed)) {
+    if (RESTART_RE.test(trimmed)) {
       await db.from("messages").delete().eq("member_id", member.id);
       await db.from("survey_analyses").delete().eq("member_id", member.id);
       await db.from("members").update({ survey_status: "devam_ediyor" }).eq("id", member.id);
@@ -205,9 +218,9 @@ async function handleMessage(m: WaMessage) {
 
   // Önce veritabanına kaydet ki konuşma geçmişi asla bozulmasın, ardından WhatsApp'a gönder
   await db.from("messages").insert({ member_id: member.id, sender: "bot", content: clean });
-  await safeSendText(phone, clean);
+  const waRes = await safeSendText(phone, clean);
 
-  if (!finished) return;
+  if (!finished) return { status: "replied", waSent: waRes.sent, waError: waRes.error };
 
   await db.from("members").update({ survey_status: "tamamlandi" }).eq("id", member.id);
 
@@ -219,4 +232,5 @@ async function handleMessage(m: WaMessage) {
   } catch (anErr) {
     console.error("[webhook] analiz üretilemedi:", anErr);
   }
+  return { status: "completed", waSent: waRes.sent, waError: waRes.error };
 }
