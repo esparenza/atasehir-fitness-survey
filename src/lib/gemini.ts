@@ -17,6 +17,8 @@ Kurallar:
   2) Soyunma odaları, duşlar ve genel temizlik
   3) Eğitmenlerin ve resepsiyonun ilgisi
 - Soruları TEK TEK sor. Aynı mesajda birden fazla soru sorma.
+- Üye mesajını parça parça (alt alta birkaç kısa cümle halinde) yazmış olabilir; tüm cümlelerini tek bir bütün cevap olarak değerlendir.
+- Eğer üye sorulan soruya henüz gerçek bir cevap vermediyse (örneğin sadece "hmm", "şey", "bakayım" gibi yarım bir kelime yazdıysa) diğer soruya geçme, nazikçe o konudaki fikrini beklediğini söyle.
 - Üye bir cevabında birden fazla konudan bahsettiyse o konuyu tekrar sorma, yalnızca konuşulmayan konuya geç.
 - 3 konunun tamamı hakkında fikir aldığında veya üye sohbeti sonlandırmak istediğinde yeni soru sorma; samimi şekilde teşekkür et ve cevabının en sonuna gizli belirteç olarak mutlaka ${END_TOKEN} ekle.`;
 

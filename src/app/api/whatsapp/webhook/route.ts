@@ -12,6 +12,8 @@ const REJECT_RE = /müsait\s*değilim|musait\s*degilim|ilgilenmiyorum/i;
 const REJECT_REPLY =
   "Anlayışınız için teşekkürler 🙏 Fikriniz bizim için değerli, dilediğiniz zaman bize yazabilirsiniz. İyi antrenmanlar! 💪";
 const FALLBACK_REPLY = "Şu an mesajınızı işleyemiyorum 🙈 Birazdan tekrar yazar mısınız?";
+const DEBOUNCE_MS = 4500; // Üyenin arka arkaya (parça parça) yazdığı mesajları birleştirmek için bekleme süresi
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // --- GET: Meta webhook doğrulaması ---
 export async function GET(req: NextRequest) {
@@ -155,11 +157,13 @@ async function handleMessage(m: WaMessage) {
   }
 
   // Tekrar teslim edilen mesajları (aynı wa id) atla
-  const { error: insErr } = await db
+  const { data: insertedMsg, error: insErr } = await db
     .from("messages")
-    .insert({ member_id: member.id, sender: "user", content: trimmed, wa_message_id: m.id });
+    .insert({ member_id: member.id, sender: "user", content: trimmed, wa_message_id: m.id })
+    .select("id")
+    .single();
   if (insErr) {
-    if (insErr.code === "23505") return;
+    if (insErr.code === "23505") return { status: "duplicate" };
     throw insErr;
   }
 
@@ -168,20 +172,33 @@ async function handleMessage(m: WaMessage) {
     await db.from("members").update({ survey_status: "reddetti" }).eq("id", member.id);
     await db.from("messages").insert({ member_id: member.id, sender: "bot", content: REJECT_REPLY });
     await safeSendText(phone, REJECT_REPLY);
-    return;
+    return { status: "rejected" };
   }
 
   if (member.survey_status !== "devam_ediyor") {
     await db.from("members").update({ survey_status: "devam_ediyor" }).eq("id", member.id);
   }
 
+  // Parça parça (alt alta) yazan üyeler için: Buton tıklaması değilse 4.5 saniye bekle.
+  // Bu sürede aynı üyeden yeni bir mesaj geldiyse, bırak son gelen mesaj tümünü birleştirip cevaplasın.
+  if (!isButton && DEBOUNCE_MS > 0) {
+    await sleep(DEBOUNCE_MS);
+  }
+
   const { data: rows, error: histErr } = await db
     .from("messages")
-    .select("sender, content")
+    .select("id, sender, content")
     .eq("member_id", member.id)
     .order("created_at", { ascending: true });
   if (histErr) throw histErr;
-  const history = (rows ?? []) as HistoryItem[];
+
+  const lastRow = rows?.[rows.length - 1];
+  if (lastRow && insertedMsg && lastRow.id !== insertedMsg.id) {
+    // Üye bu sırada yeni bir mesaj daha gönderdi; o mesajın webhook'u tüm geçmişi birleştirip yanıtlayacak.
+    return { status: "debounced_merged" };
+  }
+
+  const history = (rows ?? []).map(({ sender, content }) => ({ sender, content })) as HistoryItem[];
 
   let reply: string;
   try {
@@ -198,6 +215,17 @@ async function handleMessage(m: WaMessage) {
 
   const finished = reply.includes(END_TOKEN);
   const clean = reply.split(END_TOKEN).join("").replace(/`/g, "").trim();
+
+  // Gemini yanıt üretirken (~1 sn) üye yeni bir mesaj daha attıysa eski yanıtı göndermekten vazgeç
+  const { data: latestAfterAi } = await db
+    .from("messages")
+    .select("id")
+    .eq("member_id", member.id)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (latestAfterAi?.[0]?.id && insertedMsg && latestAfterAi[0].id !== insertedMsg.id) {
+    return { status: "debounced_post_ai" };
+  }
 
   // Önce veritabanına kaydet ki konuşma geçmişi asla bozulmasın, ardından WhatsApp'a gönder
   await db.from("messages").insert({ member_id: member.id, sender: "bot", content: clean });
