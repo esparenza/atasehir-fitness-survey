@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity, AlertTriangle, Dumbbell, FlaskConical, Loader2, RefreshCw, Search,
-  Sparkles, Star, Users, Droplets, UserCheck, ChevronRight,
+  Sparkles, Star, Users, Droplets, UserCheck, ChevronRight, Download,
 } from "lucide-react";
+import * as XLSX from "xlsx";
 import {
   Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
@@ -107,6 +108,49 @@ export default function Dashboard() {
       .filter((m) => !q || m.full_name.toLowerCase().includes(q) || m.phone_number.includes(q))
       .sort((a, b) => Number(!!b.analysis?.critical_alert) - Number(!!a.analysis?.critical_alert));
   }, [data, filter, query]);
+
+  const exportExcel = useCallback(() => {
+    const sentimentLabels: Record<string, string> = {
+      pozitif: "Pozitif",
+      notr: "Nötr",
+      negatif: "Negatif",
+    };
+    const sheetRows = rows.map((m) => {
+      const a = m.analysis;
+      return {
+        "Ad Soyad": m.full_name,
+        "Telefon": `+${m.phone_number}`,
+        "Anket Durumu": STATUS_LABELS[m.survey_status],
+        "Genel Puan (1-10)": a ? a.overall_score : "",
+        "Ekipman Puanı (1-10)": a ? a.equipment_score : "",
+        "Hijyen Puanı (1-10)": a ? a.hygiene_score : "",
+        "Eğitmen/Personel Puanı (1-10)": a ? a.staff_score : "",
+        "Duygu Durumu": a ? sentimentLabels[a.sentiment] ?? a.sentiment : "",
+        "Kritik Uyarı": a ? (a.critical_alert ? "EVET (Acil)" : "Hayır") : "",
+        "AI Yönetici Özeti": a ? a.summary : "",
+        "Analiz Tarihi": a ? new Date(a.created_at).toLocaleString("tr-TR") : "",
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(sheetRows);
+    ws["!cols"] = [
+      { wch: 22 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 24 },
+      { wch: 14 },
+      { wch: 15 },
+      { wch: 65 },
+      { wch: 18 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Memnuniyet Analizi");
+    const dateStr = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `Atasehir_Fitness_Anket_Raporu_${dateStr}.xlsx`);
+  }, [rows]);
 
   const chartData = [
     { name: "Ekipman", value: +stats.equipment.toFixed(1) },
@@ -280,6 +324,15 @@ export default function Dashboard() {
                 {f.label}
               </button>
             ))}
+            <button
+              id="export-excel"
+              onClick={exportExcel}
+              disabled={rows.length === 0}
+              className="flex items-center gap-1.5 rounded-xl border border-brand/40 bg-brand/10 px-3 py-2 text-xs font-semibold text-brand transition hover:bg-brand/20 disabled:opacity-40"
+              title="Tablodaki verileri Excel (.xlsx) olarak indir"
+            >
+              <Download size={14} /> Excel İndir
+            </button>
           </div>
         </div>
 

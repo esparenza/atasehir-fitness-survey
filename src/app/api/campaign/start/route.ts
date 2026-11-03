@@ -4,12 +4,12 @@ import { sendTemplate } from "@/lib/whatsapp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
-const DELAY_MS = 1500; // her mesaj arası bekleme (ban riskini azaltır)
-const BATCH_SIZE = 10; // her N mesajda uzun mola
-const BATCH_PAUSE_MS = 5000;
-const DEFAULT_LIMIT = 50; // tek istekte (Vercel süre sınırı için) en fazla
+const DELAY_MS = 1200; // her mesaj arası bekleme (ban riskini azaltır)
+const BATCH_SIZE = 10; // her N mesajda mola
+const BATCH_PAUSE_MS = 3000;
+const DEFAULT_LIMIT = 10; // tek istekte (Vercel 60sn sınırına takılmamak için) paket boyutu
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

@@ -1,7 +1,11 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import type { Sentiment } from "./types";
 
-const MODELS = ["gemini-3-flash-preview", "gemini-2.5-flash"];
+const MODELS = [
+  "gemini-3-flash-preview",
+  "gemini-2.5-flash",
+  "gemini-3.1-flash-lite-preview",
+];
 export const END_TOKEN = "[ANKET_BITTI]";
 
 export const CHAT_SYSTEM_PROMPT = `Sen Ataşehir Fitness'ın samimi, enerjik ve çözüm odaklı üye ilişkileri asistanısın. Üyeyle WhatsApp üzerinden konuşuyorsun.
@@ -86,9 +90,10 @@ async function generateWithFallback(params: {
       } catch (err: any) {
         lastErr = err;
         const status = err?.status ?? err?.code;
-        // 503 (Yoğunluk) veya 429 (Limit) durumunda kısa bekleyip tekrar / yedek modeli dene
+        // 503 (Yoğunluk) veya 429 (Limit) durumunda rastgele jitter ile bekleyip tekrar / yedek modeli dene
         if (status === 503 || status === 429) {
-          await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+          const jitter = Math.floor(Math.random() * 500);
+          await new Promise((r) => setTimeout(r, 500 * (attempt + 1) + jitter));
           continue;
         }
         break;
